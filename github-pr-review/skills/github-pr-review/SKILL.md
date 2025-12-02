@@ -184,14 +184,14 @@ Additional context or explanation after the suggestion.'
 
 When suggesting changes to markdown files or documentation that contain triple backticks, use 4 backticks or tildes to prevent conflicts:
 
-````markdown
+`````markdown
 ````suggestion
 ```javascript
 // Suggested code with nested backticks
 const example = "value";
 ```
 ````
-````
+`````
 
 Or use tildes:
 
