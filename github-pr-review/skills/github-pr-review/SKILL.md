@@ -144,7 +144,7 @@ gh repo view --json owner,name
 - `commit_id`: Latest commit SHA from the PR
 - `comments[][path]`: File path relative to repo root
 - `comments[][line]`: End line number (use `-F` for numbers)
-- `comments[][side]`: Always use `RIGHT`
+- `comments[][side]`: Use `RIGHT` for added/modified lines (most common), `LEFT` for deleted lines
 - `comments[][body]`: Comment text with optional ```suggestion block
 
 ### Optional Parameters
@@ -179,6 +179,29 @@ Additional context or explanation after the suggestion.'
 ```
 
 **Important**: Code suggestions replace the entire line or line range. Make sure the suggested code is complete and correct.
+
+### Edge Case: Suggestions with Nested Code Blocks
+
+When suggesting changes to markdown files or documentation that contain triple backticks, use 4 backticks or tildes to prevent conflicts:
+
+````markdown
+````suggestion
+```javascript
+// Suggested code with nested backticks
+const example = "value";
+```
+````
+````
+
+Or use tildes:
+
+```markdown
+~~~suggestion
+```javascript
+const example = "value";
+```
+~~~
+```
 
 ## Common Mistakes
 

@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Clarified `side` parameter usage** - Updated documentation to explain `RIGHT` vs `LEFT` (added/modified vs deleted lines)
+- **Added nested backticks documentation** - Documented how to handle code suggestions in markdown files with triple backticks
+
 ### Planned
 - Multi-line code suggestion examples
 - Additional event type scenarios
