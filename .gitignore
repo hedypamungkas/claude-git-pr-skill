@@ -1,5 +1,8 @@
-# Claude Code settings
+# Claude Code settings (local only)
 .claude/settings.local.json
+
+# Keep CLAUDE.md for project instructions
+!.claude/CLAUDE.md
 
 # macOS
 .DS_Store

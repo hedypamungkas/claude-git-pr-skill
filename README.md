@@ -153,7 +153,31 @@ github-pr-review/           # Plugin root
   skills/                   # Skills directory
     github-pr-review/       # The skill
       SKILL.md              # Skill definition
+CHANGELOG.md                # Version history and changes
 ```
+
+## Versioning
+
+This skill follows [Semantic Versioning](https://semver.org/):
+- **Current version:** 1.0.0
+- **Version location:** `.claude-plugin/marketplace.json`
+- **Change history:** See [CHANGELOG.md](CHANGELOG.md)
+
+### Updating the Version
+
+When making changes:
+
+1. **Update CHANGELOG.md** - Add entries under `[Unreleased]`
+2. **When releasing:**
+   - Move unreleased items to new version section in CHANGELOG.md
+   - Update `version` in `.claude-plugin/marketplace.json`
+   - Create git tag: `git tag -a v1.0.1 -m "Release v1.0.1"`
+   - Push with tags: `git push --tags`
+
+**Version numbers:**
+- **PATCH** (1.0.1) - Bug fixes, typos, small improvements
+- **MINOR** (1.1.0) - New features, backwards compatible
+- **MAJOR** (2.0.0) - Breaking changes to skill behavior
 
 ## Contributing
 
