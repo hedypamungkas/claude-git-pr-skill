@@ -47,11 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Core workflow** - Now includes gh CLI check as first required step (5 steps instead of 4)
 - **Error handling** - Stops immediately if gh not installed instead of failing later
 
-## [Unreleased]
+## [1.1.1] - 2025-12-02
 
 ### Changed
 - **Clarified `side` parameter usage** - Updated documentation to explain `RIGHT` vs `LEFT` (added/modified vs deleted lines)
 - **Added nested backticks documentation** - Documented how to handle code suggestions in markdown files with triple backticks
+
+### Fixed
+- **Nested backticks syntax** - Fixed markdown rendering issue in code example (5 backticks for outer block)
+
+## [Unreleased]
 
 ### Planned
 - Multi-line code suggestion examples
