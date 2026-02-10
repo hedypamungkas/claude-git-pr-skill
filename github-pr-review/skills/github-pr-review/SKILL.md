@@ -246,6 +246,163 @@ Before posting any review, verify:
 | `Expected value to not be null` (body) | Empty or null comment body | Ensure all comments have non-empty text |
 | `Field is not defined on DraftPullRequestReviewComment` (side) | Using invalid `side` parameter | Remove `side` from all comments |
 | `"comments", "commit_id" are not permitted keys` | Trying to update pending review | Delete and recreate, or use individual comments |
+| `"13" is not a number` (position) | Using `--raw-field` for position value | Use `-F` flag instead of `--raw-field` for numeric values |
+| Position values null for some indices | Mixing `-f` and `-F` flags for array params | Use JSON payload approach for multiple comments |
+
+## Common Pitfalls
+
+### 1. Using `--raw-field` for Numeric Values
+
+**❌ WRONG:**
+```bash
+gh api repos/:owner/:repo/pulls/123/reviews \
+  --raw-field 'comments[][position]=13'
+# Error: "13" is not a number
+```
+
+**✅ CORRECT:**
+```bash
+gh api repos/:owner/:repo/pulls/123/reviews \
+  -F 'comments[][position]=13'
+# -F sends the value as a number, not a string
+```
+
+**Why:** `--raw-field` sends values as strings, but GitHub's API requires `position` to be a numeric type.
+
+### 2. Mixing `-f` and `-F` Flags for Array Parameters
+
+**❌ WRONG:**
+```bash
+gh api repos/:owner/:repo/pulls/123/reviews \
+  -f 'comments[][path]=file.ts' \      # -f for string
+  -F 'comments[][position]=13' \       # -F for number
+  -f 'comments[][body]=comment...'     # -f for string
+# Error: Some indices get null values
+```
+
+**Why:** Mixing `-f` and `-F` flags for the same array parameter causes gh CLI to not properly construct the array.
+
+**✅ CORRECT:** Use JSON payload instead (see below).
+
+### 3. Array Syntax Fragility with Multiple Comments
+
+The `comments[][]` array syntax is fragile when posting multiple comments. It works for single comments but can fail with multiple comments due to flag parsing issues.
+
+**✅ RECOMMENDED:** Use JSON payload approach for multiple comments (see below).
+
+## Recommended Approach: JSON Payload
+
+For multiple comments, the **JSON payload approach** is more reliable than using array syntax with `-f`/`-F` flags. It avoids type coercion issues and array parsing problems.
+
+### Why Use JSON Payload?
+
+- **Type safety:** Numbers are sent as numbers, not strings
+- **No flag mixing:** Avoids issues with mixing `-f` and `-F` flags
+- **Easier validation:** Can validate JSON before sending
+- **Better for multiple comments:** Handles arrays more reliably
+
+### Step-by-Step: JSON Payload Approach
+
+**Step 1: Create a JSON file with all comments**
+
+```bash
+cat <<'EOF' > /tmp/review_comments.json
+{
+  "commit_id": "c0120254f48e9ef351eea5619b437a17f00d9d88",
+  "comments": [
+    {
+      "path": "app/components/providers/details-page.tsx",
+      "position": 13,
+      "body": "Missing error handling here\n\n```suggestion\ntry {\n  await fetch();\n} catch (error) {\n  console.error(error);\n}\n```"
+    },
+    {
+      "path": "app/components/providers/details-page.tsx",
+      "position": 14,
+      "body": "Consider adding loading state"
+    },
+    {
+      "path": "src/auth.ts",
+      "position": 5,
+      "body": "Token validation is missing\n\n```suggestion\nif (!this.token) {\n  throw new Error('No token');\n}\n```"
+    }
+  ]
+}
+EOF
+```
+
+**Step 2: Post the review using `--input`**
+
+```bash
+gh api repos/:owner/:repo/pulls/6/reviews \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  --input /tmp/review_comments.json \
+  --jq '{id, state}'
+```
+
+**Step 3: Submit the pending review**
+
+```bash
+gh api repos/:owner/:repo/pulls/6/reviews/<REVIEW_ID>/events \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -f event="REQUEST_CHANGES" \
+  -f body="Found 3 issues that need to be addressed."
+```
+
+### Template: Helper Function for JSON Payload
+
+Create a helper function to make this easier:
+
+```bash
+# Add to your ~/.bashrc or ~/.zshrc
+create_pr_review() {
+  local pr_number=$1
+  local event_type=$2
+  local review_body=$3
+  local json_file=$4
+
+  # Create pending review
+  local review_id=$(gh api repos/:owner/:repo/pulls/$pr_number/reviews \
+    -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    --input "$json_file" \
+    --jq '.id')
+
+  # Submit the review
+  gh api repos/:owner/:repo/pulls/$pr_number/reviews/$review_id/events \
+    -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -f event="$event_type" \
+    -f body="$review_body"
+
+  echo "Review posted: $review_id"
+}
+
+# Usage:
+# create_pr_review 6 "REQUEST_CHANGES" "Please fix these issues." /tmp/review_comments.json
+```
+
+### Single Comment with Array Syntax (For Simple Cases)
+
+For single comments, the array syntax still works fine:
+
+```bash
+gh api repos/:owner/:repo/pulls/123/reviews \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -f commit_id="abc123" \
+  -f 'comments[][path]=file.ts' \
+  -F 'comments[][position]=15' \
+  -f 'comments[][body]=Single comment here'
+```
+
+**Key point:** For single comments, use `-F` for the `position` value (not `--raw-field`).
 
 ## Technical Workflow
 
@@ -333,16 +490,18 @@ gh repo view --json owner,name
 
 ✅ **DO:**
 - Use single quotes around parameters with `[]`: `'comments[][path]'`
-- Use `-f` for string values
-- Use `-F` for numeric values (positions)
+- Use `-f` for string values (path, body)
+- Use `-F` for numeric values (positions) - NOT `--raw-field`
 - Include API headers: `-H "Accept: application/vnd.github+json"` and `-H "X-GitHub-Api-Version: 2022-11-28"`
 - Use triple backticks with `suggestion` identifier for code suggestions
 - Calculate position from diff hunks, not line numbers
 - Validate all parameters before posting
+- **Use JSON payload approach for multiple comments** (see above)
 
 ❌ **DON'T:**
 - Use double quotes around `comments[][]` parameters
-- Mix up `-f` and `-F` flags
+- Use `--raw-field` for position values - sends as string instead of number
+- Mix `-f` and `-F` flags for the same array parameter - causes parsing issues
 - Use `line` instead of `position` - this will cause HTTP 422 errors
 - Use `side` parameter - this is NOT valid for draft reviews
 - Forget to get commit SHA first
@@ -403,6 +562,9 @@ const example = "value";
 | Invalid position values | Calculate position from diff hunk, not from line number |
 | Missing API headers | Always include `-H "Accept: application/vnd.github+json"` and `-H "X-GitHub-Api-Version: 2022-11-28"` |
 | Trying to update pending review | Cannot update - must include all comments when creating |
+| Using `--raw-field` for position | Use `-F` instead - `--raw-field` sends string, not number |
+| Mixing `-f` and `-F` for arrays | Use JSON payload approach for multiple comments |
+| Array syntax with multiple comments | Use JSON payload approach instead - more reliable |
 
 ## Red Flags - You're About to Violate the Pattern
 
@@ -420,6 +582,8 @@ Stop if you're thinking:
 - **"I'll add `side=RIGHT` to be safe"**
 - **"I can update the pending review later with more comments"**
 - **"Position is close enough to line number, I'll estimate"**
+- **"I'll use `--raw-field` for position - it should work the same"**
+- **"I'll mix `-f` and `-F` flags, it doesn't matter"**
 
 **All of these mean: STOP. Check gh first, get diff, calculate correct positions, validate all parameters, get explicit approval, then use pending review.**
 

@@ -82,6 +82,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Real-world position example** - Concrete example showing position vs line number difference
 - **Individual comment fallback** - Complete workflow for posting comments one-by-one when batch fails
 
+## [1.4.0] - 2025-12-10
+
+### Fixed
+- **gh CLI flag type issues** - Fixed "is not a number" error by documenting `-F` vs `--raw-field`
+  - `--raw-field` sends values as strings - use `-F` for numeric position values
+  - Added clear documentation on flag usage for different data types
+- **Array parsing issues** - Fixed null value errors when mixing `-f` and `-F` flags
+  - Mixing flag types for array parameters causes gh CLI parsing issues
+  - Recommend JSON payload approach for multiple comments
+
+### Changed
+- **Added "Common Pitfalls" section** - Documents three critical pitfalls:
+  - Using `--raw-field` for numeric values
+  - Mixing `-f` and `-F` flags for array parameters
+  - Array syntax fragility with multiple comments
+- **Added "Recommended Approach: JSON Payload" section** - Complete guide for using JSON payload:
+  - Step-by-step instructions for creating JSON file with comments
+  - Using `--input` flag to send JSON payload
+  - Helper function template for easier reuse
+  - Comparison with array syntax approach
+- **Updated Syntax Rules** - Clarified flag usage:
+  - Use `-F` for numeric values (NOT `--raw-field`)
+  - Recommend JSON payload for multiple comments
+- **Updated Error Reference table** - Added new error entries:
+  - `"13" is not a number` - `--raw-field` sends strings
+  - Position values null for some indices - flag mixing issue
+- **Updated Common Mistakes table** - Added new entries:
+  - Using `--raw-field` for position
+  - Mixing `-f` and `-F` for arrays
+  - Array syntax with multiple comments
+- **Updated Red Flags** - Added warnings against using `--raw-field` and mixing flags
+
+### Added
+- **JSON payload template** - Complete working example for multiple comments
+- **Helper function template** - `create_pr_review` bash function for reuse
+- **Type safety guidance** - Clear explanation of why `-F` sends numbers vs strings
+- **Validation guidance** - How to validate JSON before sending
+
 ## [Unreleased]
 
 ### Planned
