@@ -95,10 +95,11 @@ Options:
 # Step 1: Create PENDING review (no event field)
 gh api repos/:owner/:repo/pulls/<PR_NUMBER>/reviews \
   -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
   -f commit_id="<COMMIT_SHA>" \
   -f 'comments[][path]=path/to/file.ts' \
-  -F 'comments[][line]=<LINE_NUMBER>' \
-  -f 'comments[][side]=RIGHT' \
+  -F 'comments[][position]=<POSITION>' \
   -f 'comments[][body]=Comment text
 
 ```suggestion
@@ -113,9 +114,55 @@ Additional explanation...' \
 # Step 2: Submit the pending review
 gh api repos/:owner/:repo/pulls/<PR_NUMBER>/reviews/<REVIEW_ID>/events \
   -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
   -f event="COMMENT" \
   -f body="Optional overall review message"
 ```
+
+## Understanding Position vs Line Number
+
+**CRITICAL:** GitHub's review API uses `position` NOT `line` number.
+
+### What is Position?
+
+- **Position** = The line number within the diff hunk, starting from the first `@@` line
+- The line just below the `@@` hunk header is position 1
+- Position continues through all hunks in the file until a new file begins
+
+### How to Get Position
+
+**Option 1: Use the diff output (Recommended)**
+
+```bash
+# Get the diff for the PR
+gh pr diff <PR_NUMBER> > diff.txt
+
+# Or get diff for a specific file
+gh pr diff <PR_NUMBER> -- path/to/file.ts
+```
+
+Then find the position by counting lines from the `@@` hunk header:
+
+```diff
+@@ -16,7 +16,10 @@ public class Connection {
+     private string host;
+     private int port;
++    private string apiKey;  // Position 1 (first line after @@)
++                              // Position 2 (blank line)
++    public Connection(string host, int port, string apiKey) {  // Position 3
+```
+
+**Option 2: Use line number with gh pr view**
+
+```bash
+# Get the file diff with line numbers
+gh pr view <PR_NUMBER> --json files --jq '.files[] | select(.path == "path/to/file.ts") | .patch'
+```
+
+**Option 3: For simple cases, estimate position**
+
+When the file has a single change near the top, position is often close to the line number. For accuracy, always verify with the actual diff.
 
 ## Event Types
 
@@ -135,6 +182,9 @@ Choose the appropriate event type when submitting:
 # Get commit SHA
 gh pr view <PR_NUMBER> --json commits --jq '.commits[-1].oid'
 
+# Get the diff to find positions
+gh pr diff <PR_NUMBER>
+
 # Repository info (usually auto-detected by gh)
 gh repo view --json owner,name
 ```
@@ -143,13 +193,13 @@ gh repo view --json owner,name
 
 - `commit_id`: Latest commit SHA from the PR
 - `comments[][path]`: File path relative to repo root
-- `comments[][line]`: End line number (use `-F` for numbers)
-- `comments[][side]`: Use `RIGHT` for added/modified lines (most common), `LEFT` for deleted lines
+- `comments[][position]`: Position in diff (calculated from `@@` hunk headers)
 - `comments[][body]`: Comment text with optional ```suggestion block
 
 ### Optional Parameters
 
-- `comments[][start_line]`: For multi-line code suggestions (use `-F`)
+- `comments[][start_side]`: For multi-line code suggestions (use `LEFT` or `RIGHT`)
+- `comments[][start_position]`: For multi-line code suggestions (use `-F`)
 - `event`: Omit for PENDING, or use `COMMENT`/`APPROVE`/`REQUEST_CHANGES`
 
 ### Syntax Rules
@@ -157,13 +207,17 @@ gh repo view --json owner,name
 ✅ **DO:**
 - Use single quotes around parameters with `[]`: `'comments[][path]'`
 - Use `-f` for string values
-- Use `-F` for numeric values (line numbers)
+- Use `-F` for numeric values (positions)
+- Include API headers: `-H "Accept: application/vnd.github+json"` and `-H "X-GitHub-Api-Version: 2022-11-28"`
 - Use triple backticks with `suggestion` identifier for code suggestions
 
 ❌ **DON'T:**
 - Use double quotes around `comments[][]` parameters
 - Mix up `-f` and `-F` flags
+- Use `line` instead of `position` - this will cause HTTP 422 errors
+- Use `side` parameter - this is NOT valid for draft reviews
 - Forget to get commit SHA first
+- Leave any `body` values null/empty
 
 ## Code Suggestions Format
 
@@ -210,8 +264,12 @@ const example = "value";
 | Posting immediately under time pressure | Still create pending review first - can submit immediately after |
 | "Only one comment so no need for pending" | Use pending anyway - consistent workflow, allows adding more later |
 | Forgetting single quotes around `comments[][]` | Always quote: `'comments[][path]'` not `comments[][path]` |
+| Using `line` instead of `position` | Use `position` calculated from diff - `line` causes HTTP 422 |
+| Using `side` parameter | Remove `side` - NOT valid for draft reviews, causes HTTP 422 |
 | Not getting commit SHA | Run `gh pr view <NUMBER> --json commits --jq '.commits[-1].oid'` |
 | Using wrong event type | Security/bugs → REQUEST_CHANGES, Style → APPROVE, Questions → COMMENT |
+| Null/empty body values | Ensure all comments have non-empty body text |
+| Missing API headers | Always include `-H "Accept: application/vnd.github+json"` and `-H "X-GitHub-Api-Version: 2022-11-28"` |
 
 ## Red Flags - You're About to Violate the Pattern
 
@@ -225,8 +283,10 @@ Stop if you're thinking:
 - **"The approval step slows things down"**
 - **"I'll check for gh later, let me draft the review first"**
 - **"gh is probably installed, no need to check"**
+- **"I'll use `line` instead of `position` for simplicity"**
+- **"I'll add `side=RIGHT` to be safe"**
 
-**All of these mean: STOP. Check gh first, get explicit approval, then use pending review.**
+**All of these mean: STOP. Check gh first, get explicit approval, then use pending review with correct `position` values.**
 
 **Why pending reviews?** Take the same time (2 API calls vs 1) but provide critical benefits:
 - Can add more comments if you find additional issues while writing the first
@@ -240,6 +300,11 @@ Stop if you're thinking:
 - Tone might need adjustment
 - User might want to refine the message
 
+**Why use position instead of line?** GitHub's API requires diff position:
+- Line numbers don't map correctly to diff locations
+- Position identifies the exact location in the diff hunk
+- Using `line` causes HTTP 422 "Expected value to not be null" errors
+
 ## Complete Example with Approval
 
 **Step 1: Draft and show for approval**
@@ -249,15 +314,15 @@ First, analyze the PR and draft your comments. Then use AskUserQuestion:
 ```
 I've reviewed PR #123 and found 3 issues. Here's what I'll post:
 
-**Comment 1:** src/auth.ts line 20
+**Comment 1:** src/auth.ts (position 15)
 Token expiry validation is missing...
 [code suggestion shown]
 
-**Comment 2:** src/auth.ts line 35
+**Comment 2:** src/auth.ts (position 28)
 Missing error handling...
 [code suggestion shown]
 
-**Comment 3:** tests/auth.test.ts line 12
+**Comment 3:** tests/auth.test.ts (position 8)
 Missing error case test...
 [code suggestion shown]
 
@@ -273,24 +338,25 @@ Ready to post this review?
 # Create pending review with multiple comments
 gh api repos/:owner/:repo/pulls/123/reviews \
   -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
   -f commit_id="abc123" \
   -f 'comments[][path]=src/auth.ts' \
-  -F 'comments[][line]=20' \
-  -f 'comments[][side]=RIGHT' \
+  -F 'comments[][position]=15' \
   -f 'comments[][body]=First issue...' \
   -f 'comments[][path]=src/auth.ts' \
-  -F 'comments[][line]=35' \
-  -f 'comments[][side]=RIGHT' \
+  -F 'comments[][position]=28' \
   -f 'comments[][body]=Second issue...' \
   -f 'comments[][path]=tests/auth.test.ts' \
-  -F 'comments[][line]=12' \
-  -f 'comments[][side]=RIGHT' \
+  -F 'comments[][position]=8' \
   -f 'comments[][body]=Third issue...' \
   --jq '{id, state}'
 
 # Submit with appropriate event type
 gh api repos/:owner/:repo/pulls/123/reviews/<REVIEW_ID>/events \
   -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
   -f event="REQUEST_CHANGES" \
   -f body="Found 3 issues that need to be addressed before merging."
 ```
@@ -302,9 +368,11 @@ gh api repos/:owner/:repo/pulls/123/reviews/<REVIEW_ID>/events \
 - Can't batch feedback together
 - Easy to forget issues while reviewing
 - Inconsistent workflow based on perceived urgency
+- API errors from incorrect parameters (HTTP 422)
 
 **With this pattern:**
 - All feedback in one coherent review
 - PR author gets one notification with full context
 - Can refine comments before posting
 - Professional, organized reviews
+- Correct API usage prevents errors

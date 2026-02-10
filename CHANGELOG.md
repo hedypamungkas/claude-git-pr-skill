@@ -58,6 +58,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Critical API parameter errors** - Fixed HTTP 422 errors caused by incorrect API parameters:
+  - Removed invalid `side` parameter from draft review comments (not supported by DraftPullRequestReviewComment)
+  - Changed `comments[][line]` to `comments[][position]` (GitHub API requires diff position, not line number)
+  - Added required API headers: `-H "Accept: application/vnd.github+json"` and `-H "X-GitHub-Api-Version: 2022-11-28"`
+- **Null body values** - Added documentation to ensure all comment bodies are non-empty
+
+### Changed
+- **Added "Understanding Position vs Line Number" section** - Explains what position is and how to calculate it from diff hunks
+- **Updated all API examples** - Now use `position` instead of `line`, removed `side` parameter, added headers
+- **Updated Common Mistakes table** - Added new entries for line vs position, side parameter, null bodies, missing headers
+- **Updated Red Flags** - Added warnings against using `line` instead of `position` and adding `side=RIGHT`
+
+### Added
+- **Position calculation guide** - Three options for getting position values (diff output, gh pr view, estimation)
+- **Diff hunk explanation** - Visual example showing how to count position from @@ headers
+
 ### Planned
 - Multi-line code suggestion examples
 - Additional event type scenarios
