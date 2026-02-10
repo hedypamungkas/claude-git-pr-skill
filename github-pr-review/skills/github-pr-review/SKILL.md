@@ -324,6 +324,7 @@ Before posting any review, verify:
 | `Position could not be resolved` | Position value doesn't exist in diff hunk | Re-calculate position - count ALL lines including context |
 | `invalid key: "body@-"` | Using `--raw-field body@-` syntax | Use `-F body@-` or file-based approach |
 | Shell command not found errors | Special characters in body causing shell interpretation | Use file-based approach for complex bodies |
+| `Could not comment pull request review` | Calling events API on already-submitted review | Review was auto-submitted (you included `event` in payload) - don't call events API again |
 
 ## Handling Complex Comment Bodies
 
@@ -436,6 +437,56 @@ The `comments[][]` array syntax is fragile when posting multiple comments. It wo
 
 **✅ RECOMMENDED:** Use JSON payload approach for multiple comments (see below).
 
+### 4. Auto-Submit Behavior with `event` Field
+
+**❌ WRONG:**
+```bash
+# Include event in JSON, then try to submit again
+cat > /tmp/review.json <<'EOF'
+{
+  "commit_id": "abc123",
+  "event": "COMMENT",      # ← This auto-submits!
+  "body": "Overall message",
+  "comments": [...]
+}
+EOF
+
+gh api repos/:owner/:repo/pulls/6/reviews --input /tmp/review.json
+# Response: {"id": 12345, "state": "COMMENTED"} ← Already submitted!
+
+# Then trying to submit again:
+gh api repos/:owner/:repo/pulls/6/reviews/12345/events -X POST -f event="COMMENT"
+# Error: "Could not comment pull request review"
+```
+
+**✅ CORRECT:**
+```bash
+# Option A: Single-call (include event, done in one call)
+cat > /tmp/review.json <<'EOF'
+{
+  "commit_id": "abc123",
+  "event": "COMMENT",      # Auto-submits - no second call!
+  "body": "Overall message",
+  "comments": [...]
+}
+EOF
+gh api repos/:owner/:repo/pulls/6/reviews --input /tmp/review.json
+# Done! No second call needed.
+
+# Option B: Two-call (omit event, submit later)
+cat > /tmp/review.json <<'EOF'
+{
+  "commit_id": "abc123",
+  # NO event field - creates pending
+  "comments": [...]
+}
+EOF
+REVIEW_ID=$(gh api repos/:owner/:repo/pulls/6/reviews --input /tmp/review.json --jq '.id')
+gh api repos/:owner/:repo/pulls/6/reviews/$REVIEW_ID/events -X POST -f event="COMMENT"
+```
+
+**Why:** Including `event` in the initial payload auto-submits the review. If you then try to call the events API, you'll get "Could not comment pull request review" because it's already submitted.
+
 ## Recommended Approach: JSON Payload
 
 For multiple comments, the **JSON payload approach** is more reliable than using array syntax with `-f`/`-F` flags. It avoids type coercion issues and array parsing problems.
@@ -447,19 +498,35 @@ For multiple comments, the **JSON payload approach** is more reliable than using
 - **Easier validation:** Can validate JSON before sending
 - **Better for multiple comments:** Handles arrays more reliably
 
-### Step-by-Step: JSON Payload Approach
+### CRITICAL: Single-Call vs Two-Call Workflow
 
-**Step 1: Create a JSON file with all comments**
+**⚠️ IMPORTANT:** Whether your review is auto-submitted depends on whether you include the `event` field in your JSON payload.
+
+| Approach | Include `event`? | Result | Next Steps |
+|----------|-----------------|--------|------------|
+| **Single-Call** | Yes | Review **auto-submitted immediately** | None - done! |
+| **Two-Call** | No | Review created as **PENDING** | Must call events API to submit |
+
+**⚠️ DO NOT call the events API if you included `event` in your initial payload!** The review will already be submitted and you'll get "Could not comment pull request review" error.
+
+---
+
+## Option 1: Single-Call (Recommended for Most Cases)
+
+Include `event` and `body` fields to submit immediately in one call:
 
 ```bash
+# Create JSON with event field - auto-submits!
 cat <<'EOF' > /tmp/review_comments.json
 {
   "commit_id": "c0120254f48e9ef351eea5619b437a17f00d9d88",
+  "event": "REQUEST_CHANGES",
+  "body": "Found 3 issues that need to be addressed.",
   "comments": [
     {
       "path": "app/components/providers/details-page.tsx",
       "position": 13,
-      "body": "Missing error handling here\n\n```suggestion\ntry {\n  await fetch();\n} catch (error) {\n  console.error(error);\n}\n```"
+      "body": "Missing error handling here..."
     },
     {
       "path": "app/components/providers/details-page.tsx",
@@ -469,28 +536,63 @@ cat <<'EOF' > /tmp/review_comments.json
     {
       "path": "src/auth.ts",
       "position": 5,
-      "body": "Token validation is missing\n\n```suggestion\nif (!this.token) {\n  throw new Error('No token');\n}\n```"
+      "body": "Token validation is missing..."
     }
   ]
 }
 EOF
-```
 
-**Step 2: Post the review using `--input`**
-
-```bash
+# Post the review - ONE CALL, DONE!
 gh api repos/:owner/:repo/pulls/6/reviews \
   -X POST \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
   --input /tmp/review_comments.json \
   --jq '{id, state}'
+# Response: {"id": 12345, "state": "CHANGES_REQUESTED"}
+# Note: state is NOT "PENDING" - it's already submitted!
 ```
 
-**Step 3: Submit the pending review**
+**No second call needed!** The review is immediately submitted.
+
+---
+
+## Option 2: Two-Call (Pending Review Pattern)
+
+Omit `event` field to create a pending review, then submit later:
+
+**Step 1: Create PENDING review (no event field)**
 
 ```bash
-gh api repos/:owner/:repo/pulls/6/reviews/<REVIEW_ID>/events \
+# Create JSON WITHOUT event field
+cat <<'EOF' > /tmp/review_comments.json
+{
+  "commit_id": "c0120254f48e9ef351eea5619b437a17f00d9d88",
+  "comments": [
+    {
+      "path": "app/components/providers/details-page.tsx",
+      "position": 13,
+      "body": "Missing error handling here..."
+    }
+  ]
+}
+EOF
+
+# Create pending review
+REVIEW_ID=$(gh api repos/:owner/:repo/pulls/6/reviews \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  --input /tmp/review_comments.json \
+  --jq '.id')
+# Response: {"id": 12345, "state": "PENDING"}
+```
+
+**Step 2: Submit the pending review**
+
+```bash
+# Now submit with event
+gh api repos/:owner/:repo/pulls/6/reviews/$REVIEW_ID/events \
   -X POST \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -498,19 +600,43 @@ gh api repos/:owner/:repo/pulls/6/reviews/<REVIEW_ID>/events \
   -f body="Found 3 issues that need to be addressed."
 ```
 
-### Template: Helper Function for JSON Payload
+---
 
-Create a helper function to make this easier:
+## Helper Functions
+
+### Single-Call Helper (Recommended)
 
 ```bash
 # Add to your ~/.bashrc or ~/.zshrc
-create_pr_review() {
+create_review_single_call() {
+  local pr_number=$1
+  local json_file=$2
+
+  # JSON should include event and body fields
+  gh api repos/:owner/:repo/pulls/$pr_number/reviews \
+    -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    --input "$json_file"
+
+  echo "Review submitted successfully!"
+}
+
+# Usage:
+# create_review_single_call 6 /tmp/review_with_event.json
+```
+
+### Two-Call Helper (Pending Pattern)
+
+```bash
+# Add to your ~/.bashrc or ~/.zshrc
+create_review_pending() {
   local pr_number=$1
   local event_type=$2
   local review_body=$3
   local json_file=$4
 
-  # Create pending review
+  # Create pending review (JSON should NOT include event)
   local review_id=$(gh api repos/:owner/:repo/pulls/$pr_number/reviews \
     -X POST \
     -H "Accept: application/vnd.github+json" \
@@ -535,9 +661,11 @@ create_pr_review() {
 
 ### Single Comment with Array Syntax (For Simple Cases)
 
-For single comments, the array syntax still works fine:
+For single comments, the array syntax still works fine. **Same rules apply:**
 
+**Without `event` field** - Creates PENDING review:
 ```bash
+# Creates pending - must submit later
 gh api repos/:owner/:repo/pulls/123/reviews \
   -X POST \
   -H "Accept: application/vnd.github+json" \
@@ -548,7 +676,24 @@ gh api repos/:owner/:repo/pulls/123/reviews \
   -f 'comments[][body]=Single comment here'
 ```
 
-**Key point:** For single comments, use `-F` for the `position` value (not `--raw-field`).
+**With `event` field** - Auto-submits immediately:
+```bash
+# Auto-submits - one call, done!
+gh api repos/:owner/:repo/pulls/123/reviews \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -f commit_id="abc123" \
+  -f event="COMMENT" \
+  -f body="Overall message" \
+  -f 'comments[][path]=file.ts' \
+  -F 'comments[][position]=15' \
+  -f 'comments[][body]=Single comment here'
+```
+
+**Key point:**
+- Use `-F` for the `position` value (not `--raw-field`)
+- Include `event` field to submit immediately, omit for pending pattern
 
 ## Technical Workflow
 
@@ -711,6 +856,7 @@ const example = "value";
 | Using `--raw-field` for position | Use `-F` instead - `--raw-field` sends string, not number |
 | Mixing `-f` and `-F` for arrays | Use JSON payload approach for multiple comments |
 | Array syntax with multiple comments | Use JSON payload approach instead - more reliable |
+| Including `event` in JSON then calling events API | Review auto-submits - don't call events API again, or omit `event` for two-call pattern |
 
 ## Red Flags - You're About to Violate the Pattern
 
@@ -730,6 +876,8 @@ Stop if you're thinking:
 - **"Position is close enough to line number, I'll estimate"**
 - **"I'll use `--raw-field` for position - it should work the same"**
 - **"I'll mix `-f` and `-F` flags, it doesn't matter"**
+- **"I'll include `event` in my JSON and also call the events API"**
+- **"The JSON payload with `event` creates a pending review"**
 
 **All of these mean: STOP. Check gh first, get diff, calculate correct positions, validate all parameters, get explicit approval, then use pending review.**
 

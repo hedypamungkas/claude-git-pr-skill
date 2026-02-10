@@ -120,6 +120,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Type safety guidance** - Clear explanation of why `-F` sends numbers vs strings
 - **Validation guidance** - How to validate JSON before sending
 
+## [1.6.0] - 2025-12-10
+
+### Fixed
+- **Auto-submit behavior documentation** - Clarified that including `event` in JSON payload auto-submits review
+- **"Could not comment pull request review" errors** - Documented that calling events API on already-submitted review fails
+- **Inconsistent workflow documentation** - Separated single-call and two-call patterns clearly
+
+### Changed
+- **Added "CRITICAL: Single-Call vs Two-Call Workflow" section** - Clear table explaining behavior difference
+- **Reorganized JSON Payload section** - Now clearly shows Option 1 (single-call) and Option 2 (two-call)
+- **Updated Helper Functions** - Separate functions for single-call and two-call patterns
+- **Updated "Single Comment with Array Syntax" section** - Added auto-submit behavior clarification
+- **Added Common Pitfall #4** - Documents auto-submit behavior with `event` field
+- **Updated Error Reference table** - Added new entry for "Could not comment pull request review"
+- **Updated Common Mistakes table** - Added entry for including `event` then calling events API
+- **Updated Red Flags** - Added warnings about auto-submit assumptions
+
+### Added
+- **State explanation** - Clarified that state="COMMENTED" means already submitted vs state="PENDING"
+- **Decision tree** - Clear guidance on when to use single-call vs two-call approach
+- **Validation tip** - Check review state before calling events API
+
 ## [1.5.0] - 2025-12-10
 
 ### Fixed
