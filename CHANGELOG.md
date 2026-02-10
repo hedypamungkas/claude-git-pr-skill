@@ -120,6 +120,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Type safety guidance** - Clear explanation of why `-F` sends numbers vs strings
 - **Validation guidance** - How to validate JSON before sending
 
+## [1.5.0] - 2025-12-10
+
+### Fixed
+- **Position calculation fragility** - Added helper command for automatic position calculation
+- **Shell escaping issues** - Added file-based approach documentation for complex bodies
+- **"Position could not be resolved" errors** - Clarified that ALL lines in diff hunk count (including context)
+- **`body@-` syntax errors** - Documented correct syntax: `-F body@-` not `--raw-field body@-`
+
+### Added
+- **Helper commands** directory with two utility scripts:
+  - `calculate-position.sh` - Automatically calculates position numbers for any file in PR
+  - `validate-review.sh` - Validates review JSON before posting (checks fields, positions, file paths)
+- **templates** directory with JSON template for review creation
+- **"Handling Complex Comment Bodies" section** - Complete guide for file-based approach
+- **commands/README.md** - Full documentation for helper commands
+
+### Changed
+- **Updated position calculation section** - Now emphasizes using helper command
+- **Added visual position mapping** - Shows how to count positions with numbered examples
+- **Updated Error Reference table** - Added 3 new error entries:
+  - `Position could not be resolved`
+  - `invalid key: "body@-"`
+  - Shell command not found errors
+- **Enhanced Core Workflow** - Now references helper commands for easier workflow
+
+### Structure
+- Added `commands/` directory for helper scripts
+- Added `templates/` directory for reusable templates
+- Both directories are now part of the plugin distribution
+
 ## [Unreleased]
 
 ### Planned

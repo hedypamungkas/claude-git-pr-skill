@@ -102,6 +102,39 @@ Options:
 
 ### Step-by-Step: How to Calculate Position
 
+**CRITICAL:** Position must be counted from ALL lines in the diff hunk, including:
+- Added lines (`+`)
+- Removed lines (`-`)
+- Context lines (unchanged, shown with space)
+- Empty lines
+
+**Option 1: Use the helper command (Recommended)**
+
+```bash
+# Use the built-in position calculator
+./commands/calculate-position.sh 6 app/components/ProviderList.tsx
+```
+
+Output:
+```
+Calculating positions for: app/components/ProviderList.tsx in PR #6
+========================================
+
+@@ -1,9 +1,19 @@
+Position 1: import { Link } from "react-router";
+Position 2: (empty line)
+Position 3: import { Award, Briefcase, CheckCircle2 } from "lucide-react";
+Position 4: (empty line)
+Position 5: import ekaHospitalImage ...
+Position 6: import heroImage ...
+Position 7: (empty line)
+Position 8: import luthiGatamImage ...
+Position 9: +import pondokIndahImage ...  ← Use position 9
+Position 10: +import siloamImage ...       ← Use position 10
+```
+
+**Option 2: Manual calculation**
+
 **Step 1: Get the diff for the PR**
 
 ```bash
@@ -128,15 +161,55 @@ index 1234567..abcdefg 100644
  }
 ```
 
-**Step 3: Count from the `@@` line**
+**Step 3: Count from the `@@` line - ALL lines count!**
 
 ```diff
 @@ -15,6 +15,7 @@ import { useState } from 'react';
-export function Button({ label }: { label: string }) {
-+  const [loading, setLoading] = useState(false);  // ← Position 1 (first line after @@)
-  return <button>{label}</button>;                 // ← Position 2
-}                                                    // ← Position 3
+Position 1: export function Button({ label }: { label: string }) {
+Position 2: +  const [loading, setLoading] = useState(false);
+Position 3:   return <button>{label}</button>;
+Position 4: }
 ```
+
+**Common mistake:** Only counting added lines (`+`). **Fix:** Count ALL lines including context and removed lines.
+
+### Helper Commands
+
+This skill includes helper commands to make position calculation and validation easier:
+
+#### calculate-position.sh
+
+Automatically calculates position numbers for a file in the PR:
+
+```bash
+./commands/calculate-position.sh <pr_number> <file_path>
+```
+
+Example:
+```bash
+./commands/calculate-position.sh 6 app/components/ProviderList.tsx
+```
+
+#### validate-review.sh
+
+Validates a review JSON file before posting:
+
+```bash
+./commands/validate-review.sh <pr_number> <json_file>
+```
+
+Example:
+```bash
+./commands/validate-review.sh 6 /tmp/review_comments.json
+```
+
+This checks:
+- JSON structure is valid
+- All required fields are present
+- Positions are numeric
+- Files exist in the PR diff
+
+See `commands/README.md` for full documentation.
 
 ### Real-World Example
 
@@ -248,6 +321,79 @@ Before posting any review, verify:
 | `"comments", "commit_id" are not permitted keys` | Trying to update pending review | Delete and recreate, or use individual comments |
 | `"13" is not a number` (position) | Using `--raw-field` for position value | Use `-F` flag instead of `--raw-field` for numeric values |
 | Position values null for some indices | Mixing `-f` and `-F` flags for array params | Use JSON payload approach for multiple comments |
+| `Position could not be resolved` | Position value doesn't exist in diff hunk | Re-calculate position - count ALL lines including context |
+| `invalid key: "body@-"` | Using `--raw-field body@-` syntax | Use `-F body@-` or file-based approach |
+| Shell command not found errors | Special characters in body causing shell interpretation | Use file-based approach for complex bodies |
+
+## Handling Complex Comment Bodies
+
+When your comment contains code blocks, backticks, quotes, or other special characters, shell escaping can become problematic. **Use file-based approach for complex bodies.**
+
+### Problem: Shell Escaping Issues
+
+```bash
+# This can fail with special characters
+-f 'comments[][body]=Fix this:
+```javascript
+const x = "string with 'quotes'";
+```
+'
+# Error: comand not found: conecting-hotels
+```
+
+### Solution: File-Based Approach
+
+**Method 1: Write body to file first**
+
+```bash
+# Create a file with your comment body
+cat > /tmp/comment_body.txt <<'EOF'
+Fix the import path:
+
+```suggestion
+import pondokIndahImage from "~/assets/images/hotels/pondok-indah.jpg"
+```
+
+The path was incorrect - "conecting-hotels" should be "hotels".
+EOF
+
+# Use -F with file reference
+gh api repos/:owner/:repo/pulls/6/reviews \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -f commit_id="abc123" \
+  -f 'comments[][path]=file.ts' \
+  -F 'comments[][position]=13' \
+  -F 'comments[][body]@/tmp/comment_body.txt'
+```
+
+**Method 2: Use JSON payload (Recommended for multiple comments)**
+
+```bash
+# Create JSON file with all comments
+cat > /tmp/review.json <<'EOF'
+{
+  "commit_id": "abc123",
+  "comments": [
+    {
+      "path": "file.ts",
+      "position": 13,
+      "body": "Fix the import path:\n\n```suggestion\nimport pondokIndahImage from \"~/assets/images/hotels/pondok-indah.jpg\"\n```\n\nThe path was incorrect."
+    }
+  ]
+}
+EOF
+
+# Use --input to send JSON
+gh api repos/:owner/:repo/pulls/6/reviews \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  --input /tmp/review.json
+```
+
+**Key tip:** When using heredoc with single quotes `<<'EOF'`, the content is treated literally without any shell interpretation.
 
 ## Common Pitfalls
 
