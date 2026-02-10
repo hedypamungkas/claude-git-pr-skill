@@ -56,24 +56,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Nested backticks syntax** - Fixed markdown rendering issue in code example (5 backticks for outer block)
 
-## [Unreleased]
+## [1.3.0] - 2025-12-10
 
 ### Fixed
 - **Critical API parameter errors** - Fixed HTTP 422 errors caused by incorrect API parameters:
   - Removed invalid `side` parameter from draft review comments (not supported by DraftPullRequestReviewComment)
   - Changed `comments[][line]` to `comments[][position]` (GitHub API requires diff position, not line number)
   - Added required API headers: `-H "Accept: application/vnd.github+json"` and `-H "X-GitHub-Api-Version: 2022-11-28"`
-- **Null body values** - Added documentation to ensure all comment bodies are non-empty
+- **Null value handling** - Added validation for null/empty path, body, and position values
 
 ### Changed
-- **Added "Understanding Position vs Line Number" section** - Explains what position is and how to calculate it from diff hunks
-- **Updated all API examples** - Now use `position` instead of `line`, removed `side` parameter, added headers
-- **Updated Common Mistakes table** - Added new entries for line vs position, side parameter, null bodies, missing headers
-- **Updated Red Flags** - Added warnings against using `line` instead of `position` and adding `side=RIGHT`
+- **Added "GitHub API Limitations" section** - Documents that pending reviews cannot be updated with new comments
+- **Added "Step-by-Step: How to Calculate Position"** - Detailed guide with visual examples for calculating position from diff hunks
+- **Added "Validation Checklist"** - Pre-posting checklist to verify all parameters are valid
+- **Added "Error Reference" table** - Maps error messages to their causes and fixes
+- **Added "Error Handling Guide"** - Strategies for handling position calculation failures and batch post failures
+- **Added "Fallback Strategy" section** - Individual comment posting when batch fails
+- **Updated Core Workflow** - Now includes 7 steps with diff fetching and validation
+- **Updated Common Mistakes table** - Added entries for null path values, invalid position values, trying to update pending reviews
+- **Updated Red Flags** - Added warnings against updating pending reviews and estimating positions
 
 ### Added
-- **Position calculation guide** - Three options for getting position values (diff output, gh pr view, estimation)
-- **Diff hunk explanation** - Visual example showing how to count position from @@ headers
+- **Position calculation validation** - Bash command to verify positions before posting
+- **Common position mistakes** - List of common errors when calculating positions
+- **Real-world position example** - Concrete example showing position vs line number difference
+- **Individual comment fallback** - Complete workflow for posting comments one-by-one when batch fails
+
+## [Unreleased]
 
 ### Planned
 - Multi-line code suggestion examples

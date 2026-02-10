@@ -65,15 +65,17 @@ gh auth login
 **REQUIRED STEPS (do not skip):**
 
 1. **Check gh CLI is installed** - Run `gh --version` to verify
-2. **Draft the review** - Analyze PR and prepare all comments
-3. **Show user exactly what will be posted** - Use AskUserQuestion with yes/no
-4. **Get explicit approval** - Wait for user confirmation
-5. **Post the review** - Only after approval
+2. **Get PR diff** - Fetch diff to calculate correct positions
+3. **Draft the review** - Analyze PR and prepare all comments with valid positions
+4. **Validate all parameters** - Ensure no null/empty values
+5. **Show user exactly what will be posted** - Use AskUserQuestion with yes/no
+6. **Get explicit approval** - Wait for user confirmation
+7. **Post the review** - Only after approval
 
 ### Approval Pattern
 
 Before posting ANY review, use AskUserQuestion to show:
-- File and line number for each comment
+- File and position for each comment
 - Exact comment text (including code suggestions)
 - Event type (APPROVE/REQUEST_CHANGES/COMMENT)
 - Overall review message
@@ -87,19 +89,185 @@ Options:
   - No, let me revise: Allows refinement
 ```
 
-### Technical Workflow
+## Understanding Position vs Line Number
 
-**ALWAYS use the pending review pattern, even for single comments:**
+**CRITICAL:** GitHub's review API uses `position` NOT `line` number. Using incorrect positions causes HTTP 422 errors.
+
+### What is Position?
+
+- **Position** = The line number within the diff hunk, starting from the first `@@` line
+- The line just below the `@@` hunk header is position 1
+- Position continues through all hunks in the file until a new file begins
+- **Position is NOT the same as line number in the file**
+
+### Step-by-Step: How to Calculate Position
+
+**Step 1: Get the diff for the PR**
 
 ```bash
-# Step 1: Create PENDING review (no event field)
-gh api repos/:owner/:repo/pulls/<PR_NUMBER>/reviews \
+# Get full diff
+gh pr diff <PR_NUMBER> > diff.txt
+
+# Or get diff for a specific file only
+gh pr diff <PR_NUMBER> -- path/to/file.ts
+```
+
+**Step 2: Find your file in the diff**
+
+Look for the file path, then find the `@@` hunk headers:
+
+```diff
+diff --git a/src/components/Button.tsx b/src/components/Button.tsx
+index 1234567..abcdefg 100644
+--- a/src/components/Button.tsx
++++ b/src/components/Button.tsx
+@@ -15,6 +15,7 @@ import { useState } from 'react';
+ export function Button({ label }: { label: string }) {
++  const [loading, setLoading] = useState(false);  // Position 1
+   return <button>{label}</button>;
+ }
+```
+
+**Step 3: Count from the `@@` line**
+
+```diff
+@@ -15,6 +15,7 @@ import { useState } from 'react';
+export function Button({ label }: { label: string }) {
++  const [loading, setLoading] = useState(false);  // ← Position 1 (first line after @@)
+  return <button>{label}</button>;                 // ← Position 2
+}                                                    // ← Position 3
+```
+
+### Real-World Example
+
+```diff
+diff --git a/src/auth.ts b/src/auth.ts
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -20,9 +20,13 @@ export class AuthManager {
+   private token: string | null = null;
+
++  validateToken() {              // Position 1
++    if (!this.token) {           // Position 2
++      throw new Error('No token'); // Position 3
++    }                             // Position 4
++  }                               // Position 5
++
+   login() {                      // Position 6
+     this.token = 'abc';          // Position 7
+   }                              // Position 8
+ }
+```
+
+If you want to comment on `throw new Error('No token');`, the position is **3**, not the line number (which might be 23).
+
+### Validation: Check Your Position
+
+Before posting, verify your position is valid:
+
+```bash
+# Get the diff and count manually
+gh pr diff <PR_NUMBER> -- path/to/file.ts | grep -A 20 "^@@"
+```
+
+**Common position mistakes:**
+- ❌ Using absolute line number from the file
+- ❌ Counting from the file start, not from `@@`
+- ❌ Not accounting for all lines (including blank lines)
+- ✅ Count from 1 starting at the first line AFTER `@@`
+
+## GitHub API Limitations
+
+### Pending Reviews Cannot Be Updated
+
+**CRITICAL:** Once a pending review is created, you CANNOT add more comments to it.
+
+**What DOESN'T work:**
+```bash
+# ❌ This will fail with HTTP 422
+gh api repos/:owner/:repo/pulls/123/reviews/3779806918 \
+  -X PUT \
+  -f commit_id="..." \
+  -f 'comments[][path]=...' \
+  -F 'comments[][position]=...'
+# Error: "comments", "commit_id" are not permitted keys
+```
+
+**What DOES work:**
+1. Create the pending review with ALL comments at once
+2. Submit the review
+3. Add additional comments as regular PR comments (not part of the review)
+
+### Fallback Strategy: Post Comments Individually
+
+If batch posting fails due to position errors, use this fallback:
+
+```bash
+# Step 1: Create a simple review (no comments, just summary)
+gh api repos/:owner/:repo/pulls/123/reviews \
   -X POST \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
-  -f commit_id="<COMMIT_SHA>" \
+  -f commit_id="abc123" \
+  -f event="COMMENT" \
+  -f body="Please see inline comments for details."
+
+# Step 2: Add each comment individually
+for comment in "${comments[@]}"; do
+  gh api repos/:owner/:repo/pulls/123/comments \
+    -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -f commit_id="abc123" \
+    -f path="$file" \
+    -F position="$pos" \
+    -f body="$body"
+done
+```
+
+## Validation Checklist
+
+Before posting any review, verify:
+
+- [ ] `commit_id` is set to the latest commit SHA
+- [ ] All `comments[][path]` values are non-empty strings
+- [ ] All `comments[][position]` values are positive integers
+- [ ] All `comments[][body]` values are non-empty strings
+- [ ] Positions are calculated from diff hunks, not line numbers
+- [ ] No `side` parameter is included (not valid for draft reviews)
+- [ ] API headers are included: `Accept` and `X-GitHub-Api-Version`
+
+### Error Reference
+
+| Error Message | Cause | Fix |
+|---------------|-------|-----|
+| `Expected value to not be null` (position) | Missing or invalid position | Calculate position from diff hunk |
+| `Expected value to not be null` (path) | Empty or null path value | Ensure all comments have valid file paths |
+| `Expected value to not be null` (body) | Empty or null comment body | Ensure all comments have non-empty text |
+| `Field is not defined on DraftPullRequestReviewComment` (side) | Using invalid `side` parameter | Remove `side` from all comments |
+| `"comments", "commit_id" are not permitted keys` | Trying to update pending review | Delete and recreate, or use individual comments |
+
+## Technical Workflow
+
+**ALWAYS use the pending review pattern with proper validation:**
+
+```bash
+# Step 1: Get prerequisites
+PR_NUMBER=123
+COMMIT_SHA=$(gh pr view $PR_NUMBER --json commits --jq '.commits[-1].oid')
+
+# Step 2: Get diff and calculate positions
+gh pr diff $PR_NUMBER > diff.txt
+# Manually calculate positions from diff.txt
+
+# Step 3: Create PENDING review with ALL comments at once
+gh api repos/:owner/:repo/pulls/$PR_NUMBER/reviews \
+  -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -f commit_id="$COMMIT_SHA" \
   -f 'comments[][path]=path/to/file.ts' \
-  -F 'comments[][position]=<POSITION>' \
+  -F 'comments[][position]=15' \
   -f 'comments[][body]=Comment text
 
 ```suggestion
@@ -111,58 +279,14 @@ Additional explanation...' \
 
 # Returns: {"id": <REVIEW_ID>, "state": "PENDING"}
 
-# Step 2: Submit the pending review
-gh api repos/:owner/:repo/pulls/<PR_NUMBER>/reviews/<REVIEW_ID>/events \
+# Step 4: Submit the pending review
+gh api repos/:owner/:repo/pulls/$PR_NUMBER/reviews/<REVIEW_ID>/events \
   -X POST \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
   -f event="COMMENT" \
   -f body="Optional overall review message"
 ```
-
-## Understanding Position vs Line Number
-
-**CRITICAL:** GitHub's review API uses `position` NOT `line` number.
-
-### What is Position?
-
-- **Position** = The line number within the diff hunk, starting from the first `@@` line
-- The line just below the `@@` hunk header is position 1
-- Position continues through all hunks in the file until a new file begins
-
-### How to Get Position
-
-**Option 1: Use the diff output (Recommended)**
-
-```bash
-# Get the diff for the PR
-gh pr diff <PR_NUMBER> > diff.txt
-
-# Or get diff for a specific file
-gh pr diff <PR_NUMBER> -- path/to/file.ts
-```
-
-Then find the position by counting lines from the `@@` hunk header:
-
-```diff
-@@ -16,7 +16,10 @@ public class Connection {
-     private string host;
-     private int port;
-+    private string apiKey;  // Position 1 (first line after @@)
-+                              // Position 2 (blank line)
-+    public Connection(string host, int port, string apiKey) {  // Position 3
-```
-
-**Option 2: Use line number with gh pr view**
-
-```bash
-# Get the file diff with line numbers
-gh pr view <PR_NUMBER> --json files --jq '.files[] | select(.path == "path/to/file.ts") | .patch'
-```
-
-**Option 3: For simple cases, estimate position**
-
-When the file has a single change near the top, position is often close to the line number. For accuracy, always verify with the actual diff.
 
 ## Event Types
 
@@ -185,6 +309,9 @@ gh pr view <PR_NUMBER> --json commits --jq '.commits[-1].oid'
 # Get the diff to find positions
 gh pr diff <PR_NUMBER>
 
+# Get diff for specific file
+gh pr diff <PR_NUMBER> -- path/to/file.ts
+
 # Repository info (usually auto-detected by gh)
 gh repo view --json owner,name
 ```
@@ -192,9 +319,9 @@ gh repo view --json owner,name
 ### Required Parameters
 
 - `commit_id`: Latest commit SHA from the PR
-- `comments[][path]`: File path relative to repo root
-- `comments[][position]`: Position in diff (calculated from `@@` hunk headers)
-- `comments[][body]`: Comment text with optional ```suggestion block
+- `comments[][path]`: File path relative to repo root (must be non-empty)
+- `comments[][position]`: Position in diff (calculated from `@@` hunk headers, must be positive integer)
+- `comments[][body]`: Comment text with optional ```suggestion block (must be non-empty)
 
 ### Optional Parameters
 
@@ -210,6 +337,8 @@ gh repo view --json owner,name
 - Use `-F` for numeric values (positions)
 - Include API headers: `-H "Accept: application/vnd.github+json"` and `-H "X-GitHub-Api-Version: 2022-11-28"`
 - Use triple backticks with `suggestion` identifier for code suggestions
+- Calculate position from diff hunks, not line numbers
+- Validate all parameters before posting
 
 ❌ **DON'T:**
 - Use double quotes around `comments[][]` parameters
@@ -217,7 +346,8 @@ gh repo view --json owner,name
 - Use `line` instead of `position` - this will cause HTTP 422 errors
 - Use `side` parameter - this is NOT valid for draft reviews
 - Forget to get commit SHA first
-- Leave any `body` values null/empty
+- Leave any `body`, `path`, or `position` values null/empty
+- Try to update a pending review with new comments
 
 ## Code Suggestions Format
 
@@ -269,7 +399,10 @@ const example = "value";
 | Not getting commit SHA | Run `gh pr view <NUMBER> --json commits --jq '.commits[-1].oid'` |
 | Using wrong event type | Security/bugs → REQUEST_CHANGES, Style → APPROVE, Questions → COMMENT |
 | Null/empty body values | Ensure all comments have non-empty body text |
+| Null/empty path values | Ensure all comments have valid file paths |
+| Invalid position values | Calculate position from diff hunk, not from line number |
 | Missing API headers | Always include `-H "Accept: application/vnd.github+json"` and `-H "X-GitHub-Api-Version: 2022-11-28"` |
+| Trying to update pending review | Cannot update - must include all comments when creating |
 
 ## Red Flags - You're About to Violate the Pattern
 
@@ -285,11 +418,12 @@ Stop if you're thinking:
 - **"gh is probably installed, no need to check"**
 - **"I'll use `line` instead of `position` for simplicity"**
 - **"I'll add `side=RIGHT` to be safe"**
+- **"I can update the pending review later with more comments"**
+- **"Position is close enough to line number, I'll estimate"**
 
-**All of these mean: STOP. Check gh first, get explicit approval, then use pending review with correct `position` values.**
+**All of these mean: STOP. Check gh first, get diff, calculate correct positions, validate all parameters, get explicit approval, then use pending review.**
 
 **Why pending reviews?** Take the same time (2 API calls vs 1) but provide critical benefits:
-- Can add more comments if you find additional issues while writing the first
 - Can review your own comments before submitting
 - Consistent workflow regardless of urgency
 - Batches all comments into one notification for the PR author
@@ -305,51 +439,65 @@ Stop if you're thinking:
 - Position identifies the exact location in the diff hunk
 - Using `line` causes HTTP 422 "Expected value to not be null" errors
 
+**Why calculate position from diff?** GitHub's API is strict about positions:
+- Position must be within the valid range of the diff hunk
+- Invalid positions cause HTTP 422 errors
+- Estimating or using line numbers doesn't work
+
 ## Complete Example with Approval
 
-**Step 1: Draft and show for approval**
+**Step 1: Get diff and calculate positions**
 
-First, analyze the PR and draft your comments. Then use AskUserQuestion:
+```bash
+# Get the diff
+gh pr diff 123 > diff.txt
+
+# Find the file and calculate positions manually
+# For example, if the diff shows:
+# @@ -15,6 +15,7 @@
+#  export function Button() {
+# +  const [loading, setLoading] = useState(false);  // Position 1
+#    return <button>{label}</button>;
+#  }
+```
+
+**Step 2: Draft and show for approval**
 
 ```
-I've reviewed PR #123 and found 3 issues. Here's what I'll post:
+I've reviewed PR #123 and found 2 issues. Here's what I'll post:
 
-**Comment 1:** src/auth.ts (position 15)
-Token expiry validation is missing...
+**Comment 1:** src/components/Button.tsx (position 1)
+Missing loading state handling in Button component.
 [code suggestion shown]
 
-**Comment 2:** src/auth.ts (position 28)
-Missing error handling...
-[code suggestion shown]
-
-**Comment 3:** tests/auth.test.ts (position 8)
-Missing error case test...
+**Comment 2:** src/auth.ts (position 5)
+Token validation is missing.
 [code suggestion shown]
 
 **Event Type:** REQUEST_CHANGES
-**Overall message:** "Found 3 issues that need to be addressed before merging."
+**Overall message:** "Found 2 issues that need to be addressed before merging."
 
 Ready to post this review?
 ```
 
-**Step 2: After approval, post the review**
+**Step 3: After approval, post the review**
 
 ```bash
-# Create pending review with multiple comments
+# Get commit SHA
+COMMIT_SHA=$(gh pr view 123 --json commits --jq '.commits[-1].oid')
+
+# Create pending review with ALL comments
 gh api repos/:owner/:repo/pulls/123/reviews \
   -X POST \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
-  -f commit_id="abc123" \
+  -f commit_id="$COMMIT_SHA" \
+  -f 'comments[][path]=src/components/Button.tsx' \
+  -F 'comments[][position]=1' \
+  -f 'comments[][body]=Missing loading state...' \
   -f 'comments[][path]=src/auth.ts' \
-  -F 'comments[][position]=15' \
-  -f 'comments[][body]=First issue...' \
-  -f 'comments[][path]=src/auth.ts' \
-  -F 'comments[][position]=28' \
-  -f 'comments[][body]=Second issue...' \
-  -f 'comments[][path]=tests/auth.test.ts' \
-  -F 'comments[][position]=8' \
-  -f 'comments[][body]=Third issue...' \
+  -F 'comments[][position]=5' \
+  -f 'comments[][body]=Token validation is missing...' \
   --jq '{id, state}'
 
 # Submit with appropriate event type
@@ -358,8 +506,62 @@ gh api repos/:owner/:repo/pulls/123/reviews/<REVIEW_ID>/events \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
   -f event="REQUEST_CHANGES" \
-  -f body="Found 3 issues that need to be addressed before merging."
+  -f body="Found 2 issues that need to be addressed before merging."
 ```
+
+## Error Handling Guide
+
+### When Position Calculation Fails
+
+If you get HTTP 422 errors related to position:
+
+1. **Verify the diff hasn't changed:**
+   ```bash
+   gh pr diff <PR_NUMBER> -- path/to/file.ts
+   ```
+
+2. **Re-calculate positions from the `@@` header:**
+   - Find the `@@` line closest to your target
+   - Count down from 1 starting at the line immediately after `@@`
+
+3. **Use the fallback strategy:**
+   - Create a review without comments
+   - Add comments individually using the `/comments` endpoint
+
+### When Batch Post Fails
+
+If creating the pending review fails with multiple comments:
+
+1. **Check for null/empty values:**
+   - All `path` values must be non-empty
+   - All `body` values must be non-empty
+   - All `position` values must be positive integers
+
+2. **Try with fewer comments:**
+   - Split into smaller batches
+   - Or use the fallback strategy
+
+3. **Use individual comment posting:**
+   ```bash
+   # Create a simple review
+   gh api repos/:owner/:repo/pulls/123/reviews \
+     -X POST \
+     -H "Accept: application/vnd.github+json" \
+     -H "X-GitHub-Api-Version: 2022-11-28" \
+     -f commit_id="$COMMIT_SHA" \
+     -f event="COMMENT" \
+     -f body="Please see inline comments."
+
+   # Add comments individually
+   gh api repos/:owner/:repo/pulls/123/comments \
+     -X POST \
+     -H "Accept: application/vnd.github+json" \
+     -H "X-GitHub-Api-Version: 2022-11-28" \
+     -f commit_id="$COMMIT_SHA" \
+     -f path="src/file.ts" \
+     -F position=15 \
+     -f body="Comment text..."
+   ```
 
 ## Real-World Impact
 
@@ -369,6 +571,7 @@ gh api repos/:owner/:repo/pulls/123/reviews/<REVIEW_ID>/events \
 - Easy to forget issues while reviewing
 - Inconsistent workflow based on perceived urgency
 - API errors from incorrect parameters (HTTP 422)
+- Wasted time trying to update pending reviews
 
 **With this pattern:**
 - All feedback in one coherent review
@@ -376,3 +579,4 @@ gh api repos/:owner/:repo/pulls/123/reviews/<REVIEW_ID>/events \
 - Can refine comments before posting
 - Professional, organized reviews
 - Correct API usage prevents errors
+- Clear error recovery strategy
