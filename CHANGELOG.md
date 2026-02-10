@@ -172,6 +172,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `templates/` directory for reusable templates
 - Both directories are now part of the plugin distribution
 
+## [2.0.0] - 2026-02-10
+
+### Added
+- **Multi-Agent Parallel Review System** - Launch 5 specialized review agents in parallel:
+  - solid-reviewer: SOLID principles + Architecture issues
+  - security-reviewer: Security vulnerabilities
+  - performance-reviewer: Performance bottlenecks
+  - error-handling-reviewer: Error handling problems
+  - boundary-reviewer: Boundary condition errors
+- **P0-P3 Severity Level System** - Consistent severity labeling across all agents:
+  - P0 (Critical): Must fix, blocks merge
+  - P1 (High): Should fix before merge
+  - P2 (Medium): Fix or create follow-up
+  - P3 (Low): Optional improvement
+- **Hybrid Event Type Mapping** - Automatic event type selection based on findings:
+  - P0/P1 findings → REQUEST_CHANGES
+  - P2 findings → COMMENT
+  - P3 findings → APPROVE with notes
+- **Agent Attribution** - Consolidated reviews maintain transparency about which agent found each issue
+- **Confidence Scoring** - All agents use 80+ confidence threshold to minimize false positives
+- **agents/ directory** - Agent definition files with specialized focus areas and checklists
+- **references/ directory** - Customized review checklists for each agent category
+- **multi-agent-review.sh** - Orchestrator script for parallel agent execution and result consolidation
+- **Commands README update** - Documentation for the new multi-agent workflow
+
+### Changed
+- **SKILL.md** - Added comprehensive multi-agent review documentation with:
+  - 5-agent overview table
+  - Severity level definitions and event type mapping
+  - Multi-agent workflow steps
+  - Agent output format examples
+  - Consolidation examples
+  - Updated Core Workflow section
+- **skill description** - Updated to mention multi-agent capability
+- **marketplace.json** - Updated to version 2.0.0 with new keywords
+
+### Breaking Changes
+- **MAJOR version bump** - v2.0.0 introduces significant new functionality
+- Existing v1.x manual workflow remains fully supported
+- Multi-agent workflow is opt-in - use manual workflow for quick/focused reviews
+
 ## [Unreleased]
 
 ### Planned

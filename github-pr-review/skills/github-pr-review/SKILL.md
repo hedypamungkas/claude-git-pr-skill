@@ -1,6 +1,6 @@
 ---
 name: github-pr-review
-description: Use when reviewing GitHub pull requests with gh CLI - creates pending reviews with code suggestions, batches comments, and chooses appropriate event types (COMMENT/APPROVE/REQUEST_CHANGES)
+description: Use when reviewing GitHub pull requests with gh CLI - creates pending reviews with code suggestions, batches comments, and chooses appropriate event types (COMMENT/APPROVE/REQUEST_CHANGES). v2.0+ supports parallel multi-agent review with 5 specialized reviewers for comprehensive analysis.
 allowed-tools: AskUserQuestion
 ---
 
@@ -10,7 +10,168 @@ allowed-tools: AskUserQuestion
 
 Workflow for reviewing GitHub pull requests using `gh api` to create pending reviews with code suggestions. **Always use pending reviews to batch comments, even under time pressure.**
 
+**v2.0.0+ Multi-Agent Review:** Launch 5 specialized agents (SOLID, Security, Performance, Error Handling, Boundaries) in parallel for comprehensive PR analysis with consistent P0-P3 severity labeling.
+
 **CRITICAL: Always get explicit user approval before posting any review comments.** Show exactly what will be posted and ask for yes/no confirmation using AskUserQuestion.
+
+## Multi-Agent Review (v2.0.0)
+
+**NEW in v2.0.0:** This skill now supports **parallel multi-agent review** using 5 specialized reviewers.
+
+### The 5 Specialized Agents
+
+| Agent | Focus Area | Examples |
+|-------|-----------|----------|
+| **solid-reviewer** | SOLID Principles + Architecture | SRP violations, god classes, OCP violations |
+| **security-reviewer** | Security Vulnerabilities | SQL injection, XSS, IDOR, hardcoded secrets |
+| **performance-reviewer** | Performance Issues | N+1 queries, O(n²) algorithms, missing cache |
+| **error-handling-reviewer** | Error Handling | Swallowed exceptions, missing error boundaries |
+| **boundary-reviewer** | Boundary Conditions | Null dereference, empty arrays, off-by-one |
+
+### Severity Levels
+
+All agents use a consistent **P0-P3 severity system**:
+
+| Level | Name | Action | Event Type |
+|-------|------|--------|------------|
+| **P0** | Critical | Must fix, blocks merge | `REQUEST_CHANGES` |
+| **P1** | High | Should fix before merge | `REQUEST_CHANGES` |
+| **P2** | Medium | Fix or create follow-up | `COMMENT` |
+| **P3** | Low | Optional improvement | `APPROVE` with notes |
+
+### Hybrid Event Type Mapping
+
+The multi-agent system automatically determines the appropriate event type based on findings:
+
+```
+if (any P0 or P1 findings exist) {
+    event = "REQUEST_CHANGES";
+} else if (any P2 findings exist) {
+    event = "COMMENT";
+} else if (any P3 findings exist) {
+    event = "APPROVE"; // with notes about P3 issues
+} else {
+    event = "APPROVE"; // clean PR
+}
+```
+
+### Multi-Agent Workflow
+
+1. **Check gh CLI is installed** - Run `gh --version`
+2. **Get PR details** - Fetch PR number and commit SHA
+3. **Launch 5 agents in parallel** - Each analyzes a specific aspect
+4. **Consolidate findings** - Merge results by severity level
+5. **Calculate positions** - Use helper commands for accuracy
+6. **Show consolidated review** - Present all findings organized by severity
+7. **Get explicit approval** - Use AskUserQuestion
+8. **Post the review** - Single-call with appropriate event type
+
+### Agent Output Format
+
+Each agent produces structured findings:
+
+```markdown
+## [Agent Name] Review
+
+### Critical (P0) - Must Fix
+- **[File:Line]** Issue description
+  - Confidence: 95
+  - Fix: [Suggestion]
+
+### High (P1) - Should Fix
+...
+```
+
+### Consolidation Example
+
+The orchestrator combines all agent outputs:
+
+```markdown
+# Consolidated PR Review
+
+## Summary
+- **P0 (Critical)**: 2 issues from security-reviewer
+- **P1 (High)**: 5 issues from solid-reviewer, performance-reviewer
+- **P2 (Medium)**: 8 issues across all agents
+- **P3 (Low)**: 3 optional improvements
+
+## 🔴 Critical (P0) - Must Fix
+
+### From Security Review
+- **app/auth.ts:45** - Hardcoded API key
+  - Confidence: 100
+  - Fix: Move to environment variable
+
+### From Performance Review
+- **app/api/users.ts:78** - N+1 query in user list
+  - Confidence: 90
+  - Fix: Use eager loading with JOIN
+
+## 🟠 High (P1) - Should Fix
+...
+```
+
+### Running Multi-Agent Review
+
+Use the orchestrator script:
+
+```bash
+./commands/multi-agent-review.sh <pr_number> <commit_sha> [output_dir]
+```
+
+Example:
+```bash
+# Get commit SHA first
+COMMIT_SHA=$(gh pr view 6 --json commits --jq '.commits[-1].oid')
+
+# Run multi-agent review
+./commands/multi-agent-review.sh 6 $COMMIT_SHA /tmp/pr-review-6
+
+# Review the consolidated output
+cat /tmp/pr-review-6/consolidated-review.md
+```
+
+### Confidence Scoring
+
+All agents use **80+ confidence threshold**:
+
+| Score | Meaning | Reported? |
+|-------|---------|-----------|
+| 0-49 | Not confident (false positive) | ❌ No |
+| 50-79 | Somewhat confident (nitpick) | ❌ No |
+| 80-89 | Confident (real issue) | ✅ Yes |
+| 90-100 | Very confident (critical) | ✅ Yes |
+
+### Agent Attributed Transparency
+
+The consolidated review maintains **agent attribution** so reviewers understand:
+
+- Which agent found each issue
+- Why it was flagged (agent's expertise area)
+- What severity level was assigned
+- Confidence score for the finding
+
+Example attribution:
+```markdown
+- **src/auth.ts:45** - Hardcoded API key (security-reviewer, P0, 100% confidence)
+```
+
+### When to Use Multi-Agent vs Manual
+
+**Use Multi-Agent (v2.0.0) for:**
+- Comprehensive PR reviews with multiple aspects to check
+- Large PRs with many files changed
+- Security-sensitive code requiring thorough analysis
+- Performance-critical code paths
+- Teams wanting consistent review coverage
+
+**Use Manual (v1.x) for:**
+- Small, straightforward PRs
+- Quick sanity checks
+- Focused review on specific aspects
+- Learning the PR review workflow
+
+---
 
 ## When to Use
 
@@ -63,6 +224,19 @@ gh auth login
 ## Core Workflow
 
 **REQUIRED STEPS (do not skip):**
+
+### Multi-Agent Workflow (v2.0.0+) - Recommended for Comprehensive Reviews
+
+1. **Check gh CLI is installed** - Run `gh --version` to verify
+2. **Get PR details** - Fetch PR number and commit SHA
+3. **Launch 5 agents in parallel** - Run `multi-agent-review.sh` orchestrator
+4. **Consolidate findings** - Script merges results by severity
+5. **Calculate positions** - Use helper commands for accuracy
+6. **Show user consolidated review** - Present findings by severity level
+7. **Get explicit approval** - Use AskUserQuestion with yes/no
+8. **Post the review** - Single-call with appropriate event type
+
+### Manual Workflow (v1.x) - For Quick/Focused Reviews
 
 1. **Check gh CLI is installed** - Run `gh --version` to verify
 2. **Get PR diff** - Fetch diff to calculate correct positions
