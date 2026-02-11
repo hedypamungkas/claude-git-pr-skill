@@ -105,6 +105,88 @@ else
       echo "   ⚠ $path not found in PR diff (may have wrong path)"
     fi
   done
+
+  echo ""
+  echo "5. Validating position ranges..."
+
+  # Function to get valid position range for a file
+  get_position_range() {
+    local file="$1"
+    local pr="$2"
+
+    gh pr diff "$pr" -- "$file" 2>/dev/null | awk '
+    BEGIN {
+      min_pos = ""
+      max_pos = ""
+      position = 0
+      in_hunk = 0
+      total_lines = 0
+    }
+
+    /^@@/ {
+      in_hunk = 1
+      position = total_lines + 1
+
+      # Format: @@ -old_start,old_count +new_start,new_count @@
+      match($0, /\+([0-9]+),([0-9]+)/, arr)
+      new_count = arr[2]
+
+      hunk_max = position + new_count - 1
+
+      if (min_pos == "" || position < min_pos) {
+        min_pos = position
+      }
+      if (max_pos == "" || hunk_max > max_pos) {
+        max_pos = hunk_max
+      }
+
+      total_lines = hunk_max
+      next
+    }
+
+    END {
+      if (min_pos != "" && max_pos != "") {
+        print min_pos ":" max_pos
+      } else {
+        print "0:0"
+      }
+    }
+    '
+  }
+
+  # Check each comment's position is valid
+  VALIDATION_FAILED=0
+  jq -c '.comments[]' "$JSON_FILE" | while read -r comment; do
+    PATH=$(echo "$comment" | jq -r '.path')
+    POSITION=$(echo "$comment" | jq -r '.position')
+
+    RANGE=$(get_position_range "$PATH" "$PR_NUMBER")
+    MIN_POS=$(echo "$RANGE" | cut -d: -f1)
+    MAX_POS=$(echo "$RANGE" | cut -d: -f2)
+
+    if [ "$MIN_POS" = "0" ] && [ "$MAX_POS" = "0" ]; then
+      echo "   ⚠ $PATH:$POSITION - Could not determine position range"
+    elif [ "$POSITION" -ge "$MIN_POS" ] && [ "$POSITION" -le "$MAX_POS" ]; then
+      echo "   ✓ $PATH:$POSITION - Valid (range: $MIN_POS-$MAX_POS)"
+    else
+      echo "   ✗ $PATH:$POSITION - INVALID! Position $POSITION out of range [$MIN_POS-$MAX_POS]"
+      echo "     → Run: ./commands/validate-position.sh $PR_NUMBER $PATH $POSITION"
+      VALIDATION_FAILED=1
+    fi
+  done
+
+  if [ "$VALIDATION_FAILED" -eq 1 ]; then
+    echo ""
+    echo "❌ Position validation failed!"
+    echo ""
+    echo "To fix invalid positions:"
+    echo "  1. Run calculate-position.sh to see valid positions:"
+    echo "     ./commands/calculate-position.sh $PR_NUMBER <file_path>"
+    echo ""
+    echo "  2. Or validate a specific position:"
+    echo "     ./commands/validate-position.sh $PR_NUMBER <file_path> <position>"
+    exit 1
+  fi
 fi
 
 echo ""

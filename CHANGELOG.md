@@ -213,6 +213,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Existing v1.x manual workflow remains fully supported
 - Multi-agent workflow is opt-in - use manual workflow for quick/focused reviews
 
+## [2.1.0] - 2026-02-10
+
+### Fixed
+- **Position validation errors** - Added position range validation to prevent HTTP 422 "could not be resolved" errors
+- **Markdown rendering issues** - Emphasized JSON payload approach as primary method to avoid backslash escaping problems
+- **Position calculation reliability** - Enhanced validate-review.sh to check if positions are within valid range for each file
+
+### Added
+- **validate-position.sh** - New command to validate a single position before posting:
+  - Shows valid position range for each file
+  - Returns ✅ Valid or ❌ Invalid with expected range
+  - Provides helpful error messages with diff hunk context
+- **post-review.sh** - New command to post reviews using JSON payload:
+  - Validates JSON before posting
+  - Shows review summary with comment details
+  - Supports dry-run mode for testing
+  - Provides helpful error messages for common issues
+- **Position range validation** - validate-review.sh now checks if each position is within valid range
+- **SKILL.md CRITICAL section** - Added prominent warning about markdown escaping issues with JSON payload vs array syntax comparison table
+- **Commands README** - Documented new validate-position.sh and post-review.sh commands
+
+### Changed
+- **validate-review.sh** - Added step 5 for position range validation:
+  - Checks each comment's position is within valid range for its file
+  - Shows valid range [min-max] for each file
+  - Provides helpful fix suggestions when validation fails
+- **Documentation emphasis** - JSON payload approach now documented as PRIMARY method
+- **Error messages** - More detailed error messages for position validation failures
+
 ## [Unreleased]
 
 ### Planned

@@ -173,6 +173,103 @@ Example attribution:
 
 ---
 
+## CRITICAL: JSON Payload vs Array Syntax
+
+**⚠️ IMPORTANT: Always use JSON payload for reviews with code suggestions.**
+
+### The Markdown Escaping Problem
+
+When using the `-f` flag with array syntax, backslashes and special characters get escaped, breaking markdown code blocks:
+
+```bash
+# ❌ PROBLEMATIC: -f flag breaks markdown
+gh api .../reviews \
+  -f 'comments[][body]=Fix this:\n\n```suggestion\nconst x = 1;\n```'
+# Result: Backslashes get escaped (\\n\\n instead of \n\n)
+# Markdown breaks, suggestions appear as plain text
+```
+
+### Solution: JSON Payload Approach
+
+**✅ RECOMMENDED: Always use JSON payload with `--input` flag**
+
+```bash
+# Create JSON file with proper newlines
+cat > /tmp/review.json <<'EOF'
+{
+  "commit_id": "abc123",
+  "event": "COMMENT",
+  "body": "Found 2 issues",
+  "comments": [
+    {
+      "path": "src/file.ts",
+      "position": 13,
+      "body": "Fix the import:\n\n```suggestion\nimport { foo } from './bar';\n```"
+    }
+  ]
+}
+EOF
+
+# Post with --input (preserves formatting)
+gh api .../reviews --input /tmp/review.json
+```
+
+### Comparison Table
+
+| Aspect | Array Syntax (-f) | JSON Payload (--input) |
+|--------|-------------------|----------------------|
+| Markdown rendering | ❌ Breaks with special chars | ✅ Works correctly |
+| Type handling | ❌ Numbers become strings | ✅ Types preserved |
+| Multiple comments | ❌ Fragile, mixed flags | ✅ Reliable |
+| Validation | ❌ Hard to validate | ✅ Can validate first |
+| File reuse | ❌ Must recreate each time | ✅ Can save and reuse |
+
+### Helper Commands (v2.1.0+)
+
+The skill now includes helper commands for reliable review posting:
+
+```bash
+# Validate positions before posting
+./commands/validate-review.sh <pr_number> <json_file>
+
+# Validate a single position
+./commands/validate-position.sh <pr_number> <file_path> <position>
+
+# Post review with proper handling
+./commands/post-review.sh <pr_number> <json_file>
+
+# Dry run to test
+./commands/post-review.sh <pr_number> <json_file> dry_run
+```
+
+### Recommended Workflow
+
+1. **Create review JSON** using the template:
+   ```bash
+   cp templates/review-template.json /tmp/review.json
+   # Edit with your comments
+   ```
+
+2. **Validate before posting**:
+   ```bash
+   ./commands/validate-review.sh <pr_number> /tmp/review.json
+   ```
+
+3. **Post the review**:
+   ```bash
+   ./commands/post-review.sh <pr_number> /tmp/review.json
+   ```
+
+### Red Flags - You're About to Break Markdown
+
+Stop if you're thinking:
+- "I'll use `-f 'body=```suggestion...'`" - **This will break**
+- "The `-f` flag should work fine" - **It breaks with backticks**
+- "I'll escape the backslashes" - **Don't, use JSON instead**
+- "Array syntax is simpler" - **JSON is more reliable**
+
+---
+
 ## When to Use
 
 - Reviewing pull requests
