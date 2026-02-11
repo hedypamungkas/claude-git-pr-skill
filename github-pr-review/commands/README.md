@@ -4,6 +4,32 @@ This directory contains helper commands to make PR reviews easier and more relia
 
 ## Available Commands
 
+### Hooks
+
+#### pre-commit (NEW in v2.1.0)
+
+Validate review JSON files before committing to ensure positions are valid.
+
+**Installation:**
+```bash
+# Copy the hook to your .git/hooks directory
+cp github-pr-review/hooks/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+**What it does:**
+- Checks for review JSON files being committed
+- Validates JSON structure using jq (if available)
+- Shows positions found in the JSON
+- Reminds you to run validate-review.sh before committing
+
+**To disable:**
+```bash
+rm .git/hooks/pre-commit
+```
+
+### Helper Commands
+
 ### calculate-position.sh
 
 Calculate position numbers in the diff for a given file. This helps you find the correct position values to use in your review comments.
